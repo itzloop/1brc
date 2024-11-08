@@ -9,9 +9,10 @@ import (
 	"os"
 	"runtime/pprof"
 	"runtime/trace"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/itzloop/1brc/utils"
 )
 
 const (
@@ -131,7 +132,7 @@ func main() {
 				}
 				// buf[bol:eost]: station name
 				// buf[eost + 1:i]: measurement
-				m, err := strconv.ParseFloat(string(buf[eost+1:i]), 32)
+				m, err := utils.BtofV2(buf[eost+1:i])
 				if err != nil {
 					log.Panicf("failed to parse %v=buf[%d:%d]=%s, eost=%d to float: %v\n", buf[bol:i+1], bol, i+1, string(buf[bol:i]), eost, err)
 				}
@@ -144,9 +145,9 @@ func main() {
 						Max: -100,
 					}
 				} else {
-					agM.Max = max(agM.Max, float32(m))
-					agM.Min = min(agM.Min, float32(m))
-					agM.Total += m
+					agM.Max = max(agM.Max, m)
+					agM.Min = min(agM.Min, m)
+					agM.Total += float64(m)
 					agM.Count++
 				}
 				ag[stName] = agM
