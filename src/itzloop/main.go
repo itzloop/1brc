@@ -11,6 +11,7 @@ import (
 	"runtime/trace"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/itzloop/1brc/utils"
 )
@@ -59,7 +60,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-    if *traceProf {
+	if *traceProf {
 		n := fmt.Sprintf("trace-%s.trace", now.Format("2006-01-02T15-04"))
 		log.Println("running trace profiler...")
 		log.Printf("trace data will be saved in %s\n", n)
@@ -76,7 +77,7 @@ func main() {
 		}
 
 		defer trace.Stop()
-    }
+	}
 
 	input, err := os.Open(*inputPath)
 	if err != nil {
@@ -93,7 +94,6 @@ func main() {
 
 	// read the file in chunks
 	chunckSize := 1 * GiB
-	buf := make([]byte, chunckSize)
 	var remainder []byte
 	overallDuration := int64(0)
 	overallBytes := 0
@@ -101,6 +101,7 @@ func main() {
 	for {
 		start := time.Now()
 		//n, err := input.ReadAt(buf, int64((7+count)*1073741824))
+        buf := make([]byte, chunckSize)
 		n, err := input.Read(buf)
 		end := time.Since(start)
 		overallDuration += end.Nanoseconds()
@@ -132,19 +133,19 @@ func main() {
 				}
 				// buf[bol:eost]: station name
 				// buf[eost + 1:i]: measurement
-				m, err := utils.BtofV2(buf[eost+1:i])
+				m, err := utils.BtofV2(buf[eost+1 : i])
 				if err != nil {
 					log.Panicf("failed to parse %v=buf[%d:%d]=%s, eost=%d to float: %v\n", buf[bol:i+1], bol, i+1, string(buf[bol:i]), eost, err)
 				}
-
-				stName := string(buf[bol:eost])
+                stNameSubSlice := buf[bol:eost]
+				stName := unsafe.String(&stNameSubSlice[0], len(stNameSubSlice))
 				agM, ok := ag[stName]
 				if !ok {
 					agM = &AgMeasures{
 						Min: 100,
 						Max: -100,
 					}
-                    ag[stName] = agM
+					ag[stName] = agM
 
 				} else {
 					agM.Max = max(agM.Max, m)
