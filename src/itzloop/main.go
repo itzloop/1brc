@@ -89,7 +89,7 @@ func main() {
 		}
 	}()
 
-	ag := map[string]AgMeasures{}
+	ag := map[string]*AgMeasures{}
 
 	// read the file in chunks
 	chunckSize := 1 * GiB
@@ -140,17 +140,19 @@ func main() {
 				stName := string(buf[bol:eost])
 				agM, ok := ag[stName]
 				if !ok {
-					agM = AgMeasures{
+					agM = &AgMeasures{
 						Min: 100,
 						Max: -100,
 					}
+                    ag[stName] = agM
+
 				} else {
 					agM.Max = max(agM.Max, m)
 					agM.Min = min(agM.Min, m)
 					agM.Total += float64(m)
 					agM.Count++
 				}
-				ag[stName] = agM
+
 				totalMeasurements++
 				bol = i + 1 // set bol to be start of next line
 			}
