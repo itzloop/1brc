@@ -10,6 +10,8 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -29,6 +31,14 @@ type AgMeasures struct {
 	Total float64
 	Count int
 }
+
+var (
+	overallDuration atomic.Int64
+	ag              = map[string]*AgMeasures{}
+	mu              = sync.Mutex{}
+	wg              = sync.WaitGroup{}
+	processors      = 4
+)
 
 func main() {
 	log.SetOutput(os.Stdout)
@@ -79,6 +89,14 @@ func main() {
 		defer trace.Stop()
 	}
 
+	// create processrors
+	wg.Add(processors)
+	ch := make(chan []byte, processors)
+	for i := 0; i < processors; i++ {
+		i := i
+		go process(i, ch)
+	}
+
 	input, err := os.Open(*inputPath)
 	if err != nil {
 		log.Panicf("failed to open file: %v\n", err)
@@ -90,21 +108,19 @@ func main() {
 		}
 	}()
 
-	ag := map[string]*AgMeasures{}
-
 	// read the file in chunks
+	start := time.Now()
 	chunckSize := 1 * GiB
 	var remainder []byte
-	overallDuration := int64(0)
 	overallBytes := 0
 	// for count := 0; count < 2; count++ {
 	for {
 		start := time.Now()
 		//n, err := input.ReadAt(buf, int64((7+count)*1073741824))
-        buf := make([]byte, chunckSize)
-		n, err := input.Read(buf)
+		buf := make([]byte, chunckSize+len(remainder))
+		n, err := input.Read(buf[len(remainder):])
 		end := time.Since(start)
-		overallDuration += end.Nanoseconds()
+		overallDuration.Add(end.Nanoseconds())
 		overallBytes += n
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -115,62 +131,30 @@ func main() {
 			log.Panicf("failed to read the input: %v\n", err)
 		}
 		log.Printf("it took %s to read %d bytes\n", end.String(), n)
-		buf = buf[:n]
-		buf = append(remainder, buf...)
-		remainder = nil
-		bol := 0  // begining of line
-		eost := 0 // end of station name
-		start = time.Now()
-		totalMeasurements := 0
-		i := 0
-		for i = 0; i < len(buf); i++ {
+
+		// prepend reminder
+		copy(buf, remainder)
+
+		// find new remainder on the new buffer
+	findRemainder:
+		for i := len(buf) - 1; i >= 0; i-- {
 			switch buf[i] {
-			case ';': // means we reached the end of station name
-				eost = i
 			case '\n':
-				if eost < bol {
-					continue
-				}
-				// buf[bol:eost]: station name
-				// buf[eost + 1:i]: measurement
-				m, err := utils.BtofV2(buf[eost+1 : i])
-				if err != nil {
-					log.Panicf("failed to parse %v=buf[%d:%d]=%s, eost=%d to float: %v\n", buf[bol:i+1], bol, i+1, string(buf[bol:i]), eost, err)
-				}
-                stNameSubSlice := buf[bol:eost]
-				stName := unsafe.String(&stNameSubSlice[0], len(stNameSubSlice))
-				agM, ok := ag[stName]
-				if !ok {
-					agM = &AgMeasures{
-						Min: 100,
-						Max: -100,
-					}
-					ag[stName] = agM
-
-				} else {
-					agM.Max = max(agM.Max, m)
-					agM.Min = min(agM.Min, m)
-					agM.Total += float64(m)
-					agM.Count++
-				}
-
-				totalMeasurements++
-				bol = i + 1 // set bol to be start of next line
+				remainder = buf[i+1:]
+				buf = buf[:i+1]
+				log.Printf("found %d bytes remainder buf[%d:%d]=%s\n", len(remainder), i+1, len(buf), string(remainder))
+				break findRemainder
 			}
 		}
 
-		end = time.Since(start)
-		overallDuration += end.Nanoseconds()
-		log.Printf("it took %s to proccess %d measurements\n", end, totalMeasurements)
-
-		if bol < i {
-			log.Printf("found %d bytes remainder buf[%d:%d]=%s\n", len(buf[bol:i]), bol, i, string(buf[bol:i]))
-			remainder = append(remainder, buf[bol:i]...)
-		}
-
+		ch <- buf
 	}
 
-	log.Printf("it took %s to fully read %d bytes\n", time.Duration(overallDuration), overallBytes)
+	log.Printf("it took %s to fully read %d bytes\n", time.Since(start), overallBytes)
+    close(ch)
+	wg.Wait()
+
+	log.Printf("it took %s to fully process %d bytes\n", time.Duration(overallDuration.Load()), overallBytes)
 
 	str := strings.Builder{}
 	str.WriteString("{")
@@ -197,4 +181,57 @@ func main() {
 		}
 	}
 
+}
+
+func process(id int, ch <-chan []byte) {
+	defer wg.Done()
+
+	for buf := range ch {
+		i := 0
+		bol := 0  // begining of line
+		eost := 0 // end of station name
+		start := time.Now()
+		totalMeasurements := 0
+		for i = 0; i < len(buf); i++ {
+			switch buf[i] {
+			case ';': // means we reached the end of station name
+				eost = i
+			case '\n':
+				if eost < bol {
+					continue
+				}
+				// buf[bol:eost]: station name
+				// buf[eost + 1:i]: measurement
+				m, err := utils.BtofV2(buf[eost+1 : i])
+				if err != nil {
+					log.Panicf("worker %d: failed to parse %v=buf[%d:%d]=%s, eost=%d to float: %v\n", id, buf[bol:i+1], bol, i+1, string(buf[bol:i]), eost, err)
+				}
+				stNameSubSlice := buf[bol:eost]
+				stName := unsafe.String(&stNameSubSlice[0], len(stNameSubSlice))
+				mu.Lock()
+				agM, ok := ag[stName]
+				if !ok {
+					agM = &AgMeasures{
+						Min: 100,
+						Max: -100,
+					}
+					ag[stName] = agM
+
+				} else {
+					agM.Max = max(agM.Max, m)
+					agM.Min = min(agM.Min, m)
+					agM.Total += float64(m)
+					agM.Count++
+				}
+				mu.Unlock()
+
+				totalMeasurements++
+				bol = i + 1 // set bol to be start of next line
+			}
+		}
+
+		end := time.Since(start)
+		overallDuration.Add(end.Nanoseconds())
+		log.Printf("worker %d: it took %s to proccess %d measurements\n", id, end, totalMeasurements)
+	}
 }
