@@ -30,12 +30,13 @@ type AgMeasures struct {
 	Max   float32
 	Total float64
 	Count int
+	mu    *sync.Mutex
 }
 
 var (
 	overallDuration atomic.Int64
 	ag              = map[string]*AgMeasures{}
-	mu              = sync.Mutex{}
+	mu              = sync.RWMutex{}
 	wg              = sync.WaitGroup{}
 	processors      = 4
 )
@@ -151,7 +152,7 @@ func main() {
 	}
 
 	log.Printf("it took %s to fully read %d bytes\n", time.Since(start), overallBytes)
-    close(ch)
+	close(ch)
 	wg.Wait()
 
 	log.Printf("it took %s to fully process %d bytes\n", time.Duration(overallDuration.Load()), overallBytes)
@@ -214,16 +215,20 @@ func process(id int, ch <-chan []byte) {
 					agM = &AgMeasures{
 						Min: 100,
 						Max: -100,
+                        mu: &sync.Mutex{},
 					}
 					ag[stName] = agM
-
+                    mu.Unlock()
 				} else {
+                    mu.Unlock()
+
+                    agM.mu.Lock()
 					agM.Max = max(agM.Max, m)
 					agM.Min = min(agM.Min, m)
 					agM.Total += float64(m)
 					agM.Count++
+                    agM.mu.Unlock()
 				}
-				mu.Unlock()
 
 				totalMeasurements++
 				bol = i + 1 // set bol to be start of next line
