@@ -30,19 +30,20 @@ type AgMeasures struct {
 	Max   float32
 	Total float64
 	Count int
-	mu    *sync.Mutex
 }
 
 var (
-	overallDuration atomic.Int64
-	ag              = map[string]*AgMeasures{}
-	mu              = sync.RWMutex{}
-	wg              = sync.WaitGroup{}
-	processors      = 4
+	overallDuration    atomic.Int64
+	globalAg           = map[string]*AgMeasures{}
+	aggregatorWG       = sync.WaitGroup{}
+	processorWG        = sync.WaitGroup{}
+	processors         = 4
+	processorChanSize  = 4
+	aggregatorChanSize = 4
 )
 
 func main() {
-	log.SetOutput(os.Stdout)
+	log.SetOutput(io.Discard)
 
 	inputPath := flag.String("i", "", "path to input file")
 	cpuProf := flag.Bool("cpu", false, "run pprof cpu profiling")
@@ -91,11 +92,15 @@ func main() {
 	}
 
 	// create processrors
-	wg.Add(processors)
-	ch := make(chan []byte, processors)
+	agCh := make(chan map[string]*AgMeasures, aggregatorChanSize)
+	aggregatorWG.Add(1)
+	go aggregator(agCh)
+
+	processorWG.Add(processors)
+	ch := make(chan []byte, processorChanSize)
 	for i := 0; i < processors; i++ {
 		i := i
-		go process(i, ch)
+		go process(i, ch, agCh)
 	}
 
 	input, err := os.Open(*inputPath)
@@ -153,13 +158,17 @@ func main() {
 
 	log.Printf("it took %s to fully read %d bytes\n", time.Since(start), overallBytes)
 	close(ch)
-	wg.Wait()
 
+	processorWG.Wait()
+	close(agCh)
+	aggregatorWG.Wait()
+
+    log.SetOutput(os.Stdout)
 	log.Printf("it took %s to fully process %d bytes\n", time.Duration(overallDuration.Load()), overallBytes)
 
 	str := strings.Builder{}
 	str.WriteString("{")
-	for k, v := range ag {
+	for k, v := range globalAg {
 		fmt.Fprintf(&str, "%s=%.1f/%.1f/%.1f, ", k, v.Min, v.Total/float64(v.Count), v.Max)
 	}
 
@@ -181,13 +190,38 @@ func main() {
 			log.Panicf("failed to start cpu profiler: %v\n", err)
 		}
 	}
-
 }
 
-func process(id int, ch <-chan []byte) {
-	defer wg.Done()
+func aggregator(agCh <-chan map[string]*AgMeasures) {
+	defer aggregatorWG.Done()
+	start := time.Now()
+	for localAg := range agCh {
+		start := time.Now()
+		for k, v := range localAg {
+			agM, ok := globalAg[k]
+			if !ok {
+				globalAg[k] = &AgMeasures{
+					Min: 100,
+					Max: -100,
+				}
+			} else {
+				agM.Max = max(agM.Max, v.Max)
+				agM.Min = min(agM.Min, v.Min)
+				agM.Total += float64(v.Total)
+				agM.Count += v.Count
+			}
+		}
+		log.Printf("aggregator: it took %s to aggregate %d results\n", time.Since(start), len(localAg))
+	}
+
+	log.Printf("aggregator: it took %s to fully aggregate all results\n", time.Since(start))
+}
+
+func process(id int, ch <-chan []byte, resultsCh chan<- map[string]*AgMeasures) {
+	defer processorWG.Done()
 
 	for buf := range ch {
+		ag := map[string]*AgMeasures{}
 		i := 0
 		bol := 0  // begining of line
 		eost := 0 // end of station name
@@ -209,31 +243,26 @@ func process(id int, ch <-chan []byte) {
 				}
 				stNameSubSlice := buf[bol:eost]
 				stName := unsafe.String(&stNameSubSlice[0], len(stNameSubSlice))
-				mu.Lock()
 				agM, ok := ag[stName]
 				if !ok {
 					agM = &AgMeasures{
 						Min: 100,
 						Max: -100,
-                        mu: &sync.Mutex{},
 					}
 					ag[stName] = agM
-                    mu.Unlock()
 				} else {
-                    mu.Unlock()
-
-                    agM.mu.Lock()
 					agM.Max = max(agM.Max, m)
 					agM.Min = min(agM.Min, m)
 					agM.Total += float64(m)
 					agM.Count++
-                    agM.mu.Unlock()
 				}
 
 				totalMeasurements++
 				bol = i + 1 // set bol to be start of next line
 			}
 		}
+
+		resultsCh <- ag
 
 		end := time.Since(start)
 		overallDuration.Add(end.Nanoseconds())
