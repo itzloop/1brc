@@ -33,7 +33,7 @@ type AgMeasures struct {
 }
 
 var (
-	overallDuration    atomic.Int64
+	// overallDuration    atomic.Int64
 	globalAg           = map[string]*AgMeasures{}
 	aggregatorWG       = sync.WaitGroup{}
 	processorWG        = sync.WaitGroup{}
@@ -43,8 +43,6 @@ var (
 )
 
 func main() {
-	log.SetOutput(io.Discard)
-
 	inputPath := flag.String("i", "", "path to input file")
 	cpuProf := flag.Bool("cpu", false, "run pprof cpu profiling")
 	heapProf := flag.Bool("heap", false, "run pprof heap profiling")
@@ -126,7 +124,7 @@ func main() {
 		buf := make([]byte, chunckSize+len(remainder))
 		n, err := input.Read(buf[len(remainder):])
 		end := time.Since(start)
-		overallDuration.Add(end.Nanoseconds())
+		// overallDuration.Add(end.Nanoseconds())
 		overallBytes += n
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -163,8 +161,7 @@ func main() {
 	close(agCh)
 	aggregatorWG.Wait()
 
-    log.SetOutput(os.Stdout)
-	log.Printf("it took %s to fully process %d bytes\n", time.Duration(overallDuration.Load()), overallBytes)
+	log.Printf("it took %s to fully process %d bytes\n", time.Since(start), overallBytes)
 
 	str := strings.Builder{}
 	str.WriteString("{")
@@ -194,7 +191,8 @@ func main() {
 
 func aggregator(agCh <-chan map[string]*AgMeasures) {
 	defer aggregatorWG.Done()
-	start := time.Now()
+    log.Println("aggregator start")
+    d := atomic.Int64{}
 	for localAg := range agCh {
 		start := time.Now()
 		for k, v := range localAg {
@@ -211,10 +209,12 @@ func aggregator(agCh <-chan map[string]*AgMeasures) {
 				agM.Count += v.Count
 			}
 		}
-		log.Printf("aggregator: it took %s to aggregate %d results\n", time.Since(start), len(localAg))
+        dd := time.Since(start)
+        d.Add(int64(dd.Nanoseconds()))
+		log.Printf("aggregator: it took %s to aggregate %d results\n", dd.String(), len(localAg))
 	}
 
-	log.Printf("aggregator: it took %s to fully aggregate all results\n", time.Since(start))
+	log.Printf("aggregator: it took %s to fully aggregate all results\n", time.Duration(d.Load()))
 }
 
 func process(id int, ch <-chan []byte, resultsCh chan<- map[string]*AgMeasures) {
@@ -265,7 +265,6 @@ func process(id int, ch <-chan []byte, resultsCh chan<- map[string]*AgMeasures) 
 		resultsCh <- ag
 
 		end := time.Since(start)
-		overallDuration.Add(end.Nanoseconds())
 		log.Printf("worker %d: it took %s to proccess %d measurements\n", id, end, totalMeasurements)
 	}
 }
