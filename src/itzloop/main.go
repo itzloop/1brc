@@ -37,9 +37,9 @@ var (
 	globalAg           = map[string]*AgMeasures{}
 	aggregatorWG       = sync.WaitGroup{}
 	processorWG        = sync.WaitGroup{}
-	processors         = 4
-	processorChanSize  = 4
-	aggregatorChanSize = 4
+	processors         = 8
+	processorChanSize  = 16
+	aggregatorChanSize = 16
 )
 
 func main() {
@@ -47,7 +47,12 @@ func main() {
 	cpuProf := flag.Bool("cpu", false, "run pprof cpu profiling")
 	heapProf := flag.Bool("heap", false, "run pprof heap profiling")
 	traceProf := flag.Bool("trace", false, "run trace profiling")
+	disableLog := flag.Bool("disable-log", false, "disable logging")
 	flag.Parse()
+
+	if *disableLog {
+		log.SetOutput(io.Discard)
+	}
 
 	now := time.Now()
 
@@ -151,7 +156,11 @@ func main() {
 			}
 		}
 
-		ch <- buf
+		// split buf
+		bufs := utils.Splitbuf(buf, processors)
+		for _, buf := range bufs {
+			ch <- buf
+		}
 	}
 
 	log.Printf("it took %s to fully read %d bytes\n", time.Since(start), overallBytes)
@@ -191,8 +200,8 @@ func main() {
 
 func aggregator(agCh <-chan map[string]*AgMeasures) {
 	defer aggregatorWG.Done()
-    log.Println("aggregator start")
-    d := atomic.Int64{}
+	log.Println("aggregator start")
+	d := atomic.Int64{}
 	for localAg := range agCh {
 		start := time.Now()
 		for k, v := range localAg {
@@ -209,8 +218,8 @@ func aggregator(agCh <-chan map[string]*AgMeasures) {
 				agM.Count += v.Count
 			}
 		}
-        dd := time.Since(start)
-        d.Add(int64(dd.Nanoseconds()))
+		dd := time.Since(start)
+		d.Add(int64(dd.Nanoseconds()))
 		log.Printf("aggregator: it took %s to aggregate %d results\n", dd.String(), len(localAg))
 	}
 
