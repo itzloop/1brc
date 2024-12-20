@@ -17,6 +17,13 @@ func Splitbuf(buf []byte, count int) [][]byte {
             }
         } else {
             chunkBytes = n - i
+        if i + chunkBytes > n {
+            if chunkBytes > 100 {
+                chunkBytes = n - 100
+            } else {
+                chunkBytes = 0
+            }
+        }
         }
 		chunks = append(chunks, buf[i:i+chunkBytes+remainder])
 	}

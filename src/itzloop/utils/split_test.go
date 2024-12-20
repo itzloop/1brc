@@ -12,7 +12,7 @@ func TestSplitbuf(t *testing.T) {
 		expected [][]byte
 	}{
 		{
-			name:  "split in 3 parts",
+			name:  "split in 3 parts len 21",
 			buf:   []byte{'a', 'a', 'a', '\n', 'b', 'b', 'b', 'b', 'b', '\n', 'c', '\n', 'd', '\n', 'e', '\n', 'f', 'f', 'f', 'f', '\n'}, // 21
 			count: 3,
 			expected: [][]byte{
@@ -21,7 +21,7 @@ func TestSplitbuf(t *testing.T) {
 			},
 		},
 		{
-			name:  "split in 5 parts",
+			name:  "split in 5 parts len 21",
 			buf:   []byte{'a', 'a', 'a', '\n', 'b', 'b', 'b', 'b', 'b', '\n', 'c', '\n', 'd', '\n', 'e', '\n', 'f', 'f', 'f', 'f', '\n'}, // 21
 			count: 5,
 			expected: [][]byte{
@@ -33,7 +33,7 @@ func TestSplitbuf(t *testing.T) {
 		},
 
 		{
-			name:  "split in 21 parts",
+			name:  "split in 21 parts len 21",
 			buf:   []byte{'a', 'a', 'a', '\n', 'b', 'b', 'b', 'b', 'b', '\n', 'c', '\n', 'd', '\n', 'e', '\n', 'f', 'f', 'f', 'f', '\n'}, // 21
 			count: 21,
 			expected: [][]byte{
@@ -46,9 +46,22 @@ func TestSplitbuf(t *testing.T) {
 			},
 		},
 		{
-			name:  "split in 8 parts",
+			name:  "split in 8 parts len 24",
 			buf:   []byte{'a', 'a', 'a', '\n', 'b', 'b', 'b', 'b', 'b', '\n', 'c', '\n', 'd', '\n', 'e', '\n', 'f', 'f', 'f', 'f', '\n', 'g', 'g', '\n'}, // 24
 			count: 8,
+			expected: [][]byte{
+				{'a', 'a', 'a', '\n'},
+				{'b', 'b', 'b', 'b', 'b', '\n'},
+				{'c', '\n', 'd', '\n'},
+				{'e', '\n', 'f', 'f', 'f', 'f', '\n'},
+				{'g', 'g', '\n'},
+			},
+		},
+
+		{
+			name:  "split in 5 parts len 24",
+			buf:   []byte{'a', 'a', 'a', '\n', 'b', 'b', 'b', 'b', 'b', '\n', 'c', '\n', 'd', '\n', 'e', '\n', 'f', 'f', 'f', 'f', '\n', 'g', 'g', '\n'}, // 24
+			count: 5,
 			expected: [][]byte{
 				{'a', 'a', 'a', '\n'},
 				{'b', 'b', 'b', 'b', 'b', '\n'},
