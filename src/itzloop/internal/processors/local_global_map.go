@@ -1,7 +1,6 @@
 package processors
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -16,25 +15,25 @@ import (
 	"github.com/itzloop/1brc/utils"
 )
 
-type SplitBufOpts struct {
+type LocalGlobalMapOpts struct {
 	Processors         int
 	ProcessorChanSize  int
 	AggregatorChanSize int
 	Log                *log.Logger
 }
-type SplitBufProcessor struct {
+type LocalGlobalMapProcessor struct {
 	globalAg     map[string]*types.AgMeasures
 	aggregatorWG sync.WaitGroup
 	processorWG  sync.WaitGroup
-	opts         SplitBufOpts
+	opts         LocalGlobalMapOpts
 }
 
-func NewSplitBufProcessor(opts SplitBufOpts) *SplitBufProcessor {
+func NewLocalGlobalMapProcessor(opts LocalGlobalMapOpts) *LocalGlobalMapProcessor {
 	if opts.Log == nil {
 		opts.Log = log.New(io.Discard, "", 0)
 	}
 
-	return &SplitBufProcessor{
+	return &LocalGlobalMapProcessor{
 		globalAg:     map[string]*types.AgMeasures{},
 		aggregatorWG: sync.WaitGroup{},
 		processorWG:  sync.WaitGroup{},
@@ -42,7 +41,7 @@ func NewSplitBufProcessor(opts SplitBufOpts) *SplitBufProcessor {
 	}
 }
 
-func (sbp *SplitBufProcessor) Process(p string) (result string, err error) {
+func (sbp *LocalGlobalMapProcessor) Process(p string) (result string, err error) {
 	// create processrors
 	agCh := make(chan map[string]*types.AgMeasures, sbp.opts.AggregatorChanSize)
 	sbp.aggregatorWG.Add(1)
@@ -104,11 +103,7 @@ func (sbp *SplitBufProcessor) Process(p string) (result string, err error) {
 			}
 		}
 
-		// split buf
-		bufs := splitbuf(buf, sbp.opts.Processors)
-		for _, buf := range bufs {
-			ch <- buf
-		}
+		ch <- buf
 	}
 
 	sbp.opts.Log.Printf("it took %s to fully read %d bytes\n", time.Since(start), overallBytes)
@@ -122,7 +117,7 @@ func (sbp *SplitBufProcessor) Process(p string) (result string, err error) {
 	return types.AgMeasureMap(sbp.globalAg).SortedString(), nil
 }
 
-func (sbp *SplitBufProcessor) aggregator(agCh <-chan map[string]*types.AgMeasures) {
+func (sbp *LocalGlobalMapProcessor) aggregator(agCh <-chan map[string]*types.AgMeasures) {
 	defer sbp.aggregatorWG.Done()
 	sbp.opts.Log.Println("aggregator start")
 	start := time.Now()
@@ -150,7 +145,7 @@ func (sbp *SplitBufProcessor) aggregator(agCh <-chan map[string]*types.AgMeasure
 	sbp.opts.Log.Printf("aggregator: it took %s to fully aggregate all results\n", time.Since(start))
 }
 
-func (sbp *SplitBufProcessor) process(id int, ch <-chan []byte, resultsCh chan<- map[string]*types.AgMeasures) {
+func (sbp *LocalGlobalMapProcessor) process(id int, ch <-chan []byte, resultsCh chan<- map[string]*types.AgMeasures) {
 	defer sbp.processorWG.Done()
 	for buf := range ch {
 		ag := map[string]*types.AgMeasures{}
@@ -199,23 +194,4 @@ func (sbp *SplitBufProcessor) process(id int, ch <-chan []byte, resultsCh chan<-
 
 		resultsCh <- ag
 	}
-}
-
-func splitbuf(buf []byte, count int) [][]byte {
-	n := len(buf)
-	remainder := 0
-	chunkBytes := n / count
-	var chunks [][]byte
-
-	for i := 0; i < n; i += chunkBytes + remainder {
-		remainder = 0
-		if i+chunkBytes < n {
-			remainder = bytes.IndexByte(buf[i+chunkBytes-1:], '\n')
-		} else {
-			chunkBytes = n - i
-		}
-		chunks = append(chunks, buf[i:i+chunkBytes+remainder])
-	}
-
-	return chunks
 }

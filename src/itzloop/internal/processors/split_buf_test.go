@@ -1,4 +1,4 @@
-package utils
+package processors
 
 import (
 	"testing"
@@ -74,7 +74,7 @@ func TestSplitbuf(t *testing.T) {
 
 	for _, tc := range table {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := Splitbuf(tc.buf, tc.count)
+			actual := splitbuf(tc.buf, tc.count)
 			if len(actual) != len(tc.expected) {
 				t.Errorf("expected chunks to be %d but got %d", len(tc.expected), len(actual))
 				t.FailNow()

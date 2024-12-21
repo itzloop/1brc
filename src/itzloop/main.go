@@ -27,7 +27,7 @@ var (
 )
 
 func main() {
-	inputPath := flag.String("i", "", "path to input file")
+	inputPath := flag.String("i", "/home/loop/p/1brc/measurements.txt", "path to input file")
 	cpuProf := flag.Bool("cpu", false, "run pprof cpu profiling")
 	heapProf := flag.Bool("heap", false, "run pprof heap profiling")
 	traceProf := flag.Bool("trace", false, "run trace profiling")
@@ -78,11 +78,26 @@ func main() {
 		defer trace.Stop()
 	}
 
-	result, err := processors.NewSplitBufProcessor(processors.SplitBufOpts{
+	// result, err := processors.NewSplitBufProcessor(processors.SplitBufOpts{
+	// 	Processors:         processorCount,
+	// 	ProcessorChanSize:  processorChanSize,
+	// 	AggregatorChanSize: aggregatorChanSize,
+	// 	Log:                log.Default(),
+	// }).Process(*inputPath)
+
+	result, err := processors.NewParallelReadProcessor(processors.ParallelReadOpts{
 		Processors:         processorCount,
 		ProcessorChanSize:  processorChanSize,
 		AggregatorChanSize: aggregatorChanSize,
+		Log:                log.Default(),
 	}).Process(*inputPath)
+
+	// result, err := processors.NewLocalGlobalMapProcessor(processors.LocalGlobalMapOpts{
+	// 	Processors:         processorCount,
+	// 	ProcessorChanSize:  processorChanSize,
+	// 	AggregatorChanSize: aggregatorChanSize,
+	// 	Log:                log.Default(),
+	// }).Process(*inputPath)
 
 	if err != nil {
 		log.Panicln(err)
